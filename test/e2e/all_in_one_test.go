@@ -735,19 +735,16 @@ func startPortForwarder(ctx context.Context, t *testing.T, env environments.Envi
 	require.NoError(t, err)
 	require.Equal(t, len(kubeconfig), written)
 	cmd := exec.CommandContext(ctx, "kubectl", "--kubeconfig", kubeconfigFile.Name(), "port-forward", "-n", pod.Namespace, pod.Name, "9777:cmetrics")
-	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
-	cmd.Stdout = stdout
-	cmd.Stderr = stderr
 	t.Logf("forwarding port %s to %s/%s:%s", localPort, pod.Namespace, pod.Name, targetPort)
-	require.NoError(t, cmd.Start(), fmt.Sprintf("STDOUT=(%s), STDERR=(%s)", stdout.String(), stderr.String()))
-	require.Eventually(t, func() bool {
+	require.NoError(t, cmd.Start(), "failed to start port-forward")
+	require.Eventuallyf(t, func() bool {
 		conn, err := net.Dial("tcp", fmt.Sprintf("localhost:%s", localPort))
 		if err == nil {
 			conn.Close()
 			return true
 		}
 		return false
-	}, kongComponentWait, time.Second)
+	}, kongComponentWait, time.Second, "could not connect to port-forward")
 }
 
 // -----------------------------------------------------------------------------
