@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"reflect"
@@ -235,6 +236,12 @@ func getUpstreams(
 				Targets: targets,
 			}
 			upstreams = append(upstreams, upstream)
+			targetsJSON, err := json.Marshal(upstream.Targets)
+			if err != nil {
+				log.Debugf("TRG failed to marshal getUpstreams: %s", err)
+			} else {
+				log.Debugf("TRG getUpstreams upstream %s has target set: %s", *upstream.Upstream.Name, string(targetsJSON))
+			}
 			upstreamDedup[name] = empty
 		}
 	}
@@ -350,7 +357,14 @@ func getServiceEndpoints(log logrus.FieldLogger, s store.Storer, svc corev1.Serv
 		log.Warningf("no active endpoints")
 	}
 
-	return targetsForEndpoints(endpoints)
+	targets := targetsForEndpoints(endpoints)
+	targetsJSON, err := json.Marshal(targets)
+	if err != nil {
+		log.Debugf("TRG failed to marshal targetsForEndpoints: %s", err)
+	} else {
+		log.Debugf("TRG targetsForEndpoints generated target set: %s", string(targetsJSON))
+	}
+	return targets
 }
 
 // getEndpoints returns a list of <endpoint ip>:<port> for a given service/target port combination.

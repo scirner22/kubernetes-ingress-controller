@@ -2,6 +2,7 @@ package deckgen
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -96,6 +97,12 @@ func ToDeckContent(
 			return strings.Compare(*upstream.Targets[i].Target.Target, *upstream.Targets[j].Target.Target) > 0
 		})
 		content.Upstreams = append(content.Upstreams, upstream)
+		targetsJSON, err := json.Marshal(upstream.Targets)
+		if err != nil {
+			log.Debugf("TRG failed to marshal ToDeckContent: %s", err)
+		} else {
+			log.Debugf("TRG ToDeckContent upstream %s has target set: %s", *upstream.Upstream.Name, string(targetsJSON))
+		}
 	}
 	sort.SliceStable(content.Upstreams, func(i, j int) bool {
 		return strings.Compare(*content.Upstreams[i].Name, *content.Upstreams[j].Name) > 0
