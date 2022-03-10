@@ -16,11 +16,18 @@ import (
 
 const defaultIngressClassAnnotation = "ingressclass.kubernetes.io/is-default-class"
 
-// HasAnnotation is a helper function to determine whether an object has a given annotation, and whether it's
-// to the value provided.
-func HasAnnotation(obj client.Object, key, expectedValue string) bool {
-	foundValue, ok := obj.GetAnnotations()[key]
-	return ok && foundValue == expectedValue
+// MatchesClass is a helper function to determine whether an object has a given ingress class or no class if the given
+// class is the default class
+func MatchesClass(obj client.Object, class string, isDefault bool) bool {
+	annotation := annotations.IngressClassKey
+	if _, ok := obj.(*knative.Ingress); ok {
+		annotation = annotations.KnativeIngressClassKey
+	}
+	foundValue, ok := obj.GetAnnotations()[annotation]
+	if !ok && isDefault {
+		return true
+	}
+	return ok && foundValue == class
 }
 
 // IsDefaultIngressClass returns whether an IngressClass is the default IngressClass
@@ -45,15 +52,11 @@ func MatchesIngressClassName(obj client.Object, ingressClassName string, isDefau
 		}
 	}
 
-	if _, ok := obj.(*knative.Ingress); ok {
-		return HasAnnotation(obj, annotations.KnativeIngressClassKey, ingressClassName)
-	}
-
-	return HasAnnotation(obj, annotations.IngressClassKey, ingressClassName)
+	return MatchesClass(obj, ingressClassName, isDefault)
 }
 
 // GeneratePredicateFuncsForIngressClassFilter builds a controller-runtime reconciliation predicate function which filters out objects
-// which do not have the "kubernetes.io/ingress.class" annotation configured and set to the provided value or in their .spec.
+// which have their ingress class set to the a value other than the controller class
 func GeneratePredicateFuncsForIngressClassFilter(name string, specCheckEnabled, annotationCheckEnabled bool) predicate.Funcs {
 	preds := predicate.NewPredicateFuncs(func(obj client.Object) bool {
 		if annotationCheckEnabled && IsIngressClassAnnotationConfigured(obj, name) {
@@ -63,11 +66,13 @@ func GeneratePredicateFuncsForIngressClassFilter(name string, specCheckEnabled, 
 			if IsIngressClassSpecConfigured(obj, name) {
 				return true
 			}
-			if IsIngressClassSpecEmpty(obj) {
-				// we include Ingresses with _no_ ingressClassName in case we're handling the default IngressClass,
-				// and will filter them out if not in MatchesIngressClassName()
-				return true
-			}
+		}
+		// we return resources with no ingress class at all here because we might be using the default class. we
+		// cannot check this here because predicate handlers don't have a client available to check, since we only
+		// have access to the object itself here, to conform with controller-runtime expectations. classless objects
+		// are filtered out by their Reconcile() method instead
+		if IsIngressClassEmpty(obj) {
+			return true
 		}
 		return false
 	})
@@ -79,9 +84,9 @@ func GeneratePredicateFuncsForIngressClassFilter(name string, specCheckEnabled, 
 			if IsIngressClassSpecConfigured(e.ObjectOld, name) || IsIngressClassSpecConfigured(e.ObjectNew, name) {
 				return true
 			}
-			if IsIngressClassSpecEmpty(e.ObjectOld) || IsIngressClassSpecEmpty(e.ObjectNew) {
-				return true
-			}
+		}
+		if IsIngressClassEmpty(e.ObjectOld) || IsIngressClassEmpty(e.ObjectNew) {
+			return true
 		}
 		return false
 	}
@@ -123,13 +128,22 @@ func IsIngressClassSpecConfigured(obj client.Object, expectedIngressClassName st
 	return false
 }
 
-// IsIngressClassSpecEmpty checks if a networking/v1 Ingress has no ingressClassName set
-func IsIngressClassSpecEmpty(obj client.Object) bool {
+// IsIngressClassEmpty returns true if an object has no ingress class information or false otherwise
+func IsIngressClassEmpty(obj client.Object) bool {
 	switch obj := obj.(type) {
 	case *netv1.Ingress:
-		return obj.Spec.IngressClassName == nil
-	default:
+		if _, ok := obj.GetAnnotations()[annotations.IngressClassKey]; !ok {
+			return obj.Spec.IngressClassName == nil
+		}
 		return false
+	default:
+		if _, ok := obj.GetAnnotations()[annotations.IngressClassKey]; ok {
+			return false
+		}
+		if _, ok := obj.GetAnnotations()[annotations.KnativeIngressClassKey]; ok {
+			return false
+		}
+		return true
 	}
 }
 
@@ -138,3 +152,37 @@ func CRDExists(client client.Client, gvr schema.GroupVersionResource) bool {
 	_, err := client.RESTMapper().KindFor(gvr)
 	return !meta.IsNoMatchError(err)
 }
+
+// ListClassless finds all objects of the given type without ingress class information
+//func ListClassless(obj client.Object) []reconcile.Request {
+//	ingresses := &netv1.IngressList{}
+//	if err := r.Client.List(context.Background(), ingresses); err != nil {
+//		r.Log.Error(err, "failed to list classless ingresses for default class")
+//		return nil
+//	}
+//	var recs []reconcile.Request
+//	for _, ingress := range ingresses.Items {
+//		if ingress.Spec.IngressClassName == nil {
+//			recs = append(recs, reconcile.Request{
+//				NamespacedName: types.NamespacedName{
+//					Namespace: ingress.Namespace,
+//					Name:      ingress.Name,
+//				},
+//			})
+//		}
+//	}
+//	return recs
+//}
+
+//func generateClasslessLister(list client.ObjectList, c client.Client) handler.MapFunc {
+//	var recs []reconcile.Request
+//	emptyMapFunc := func(obj client.Object) []reconcile.Request {
+//		return recs
+//	}
+//	if err := c.List(context.Background(), list); err != nil {
+//		return emptyMapFunc
+//	}
+//	if , ok := obj.(*netv1.IngressClass); ok {
+//	for _, obj := range list.Items {
+//	}
+//}
